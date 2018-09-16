@@ -13,69 +13,115 @@ import time
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 universe.configure_logging()
+import os
+import math
+
+
+center_x = 270
+center_y = 235
+
+# render = True
+
+# input cropping constants:
+top_left = (20,85)
+bot_right = (521,383)
+height = bot_right[1] - top_left[1]
+
+# Generic blank img for returning while stuff is being set up.
+blank_img = np.zeros((height, height, 3)).astype(dtype=np.float32)
+
+# number of points the 'mouse' can be at.
+resolution_points = 7
+
+# network output length
+# Spacebar is first output, others are the desired angles.
+n_actions = resolution_points # +1
+
 
 def create_env(env_id, client_id, remotes, **kwargs):
     spec = gym.spec(env_id)
 
-    if spec.tags.get('flashgames', False):
-        return create_flash_env(env_id, client_id, remotes, **kwargs)
-    elif spec.tags.get('atari', False) and spec.tags.get('vnc', False):
-        return create_vncatari_env(env_id, client_id, remotes, **kwargs)
-    else:
-        # Assume atari.
-        assert "." not in env_id  # universe environments have dots in names.
-        return create_atari_env(env_id)
+    # if spec.tags.get('flashgames', False):
+    #     return create_flash_env(env_id, client_id, remotes, **kwargs)
+    # elif spec.tags.get('atari', False) and spec.tags.get('vnc', False):
+    #     return create_vncatari_env(env_id, client_id, remotes, **kwargs)
+    # else:
+    #     # Assume atari.
+    #     assert "." not in env_id  # universe environments have dots in names.
+    #     return create_atari_env(env_id)
+    return create_snake_env(env_id)
 
-def create_flash_env(env_id, client_id, remotes, **_):
+# def create_flash_env(env_id, client_id, remotes, **_):
+#     env = gym.make(env_id)
+#     env = Vision(env)
+#     env = Logger(env)
+#     env = BlockingReset(env)
+
+#     reg = universe.runtime_spec('flashgames').server_registry
+#     height = reg[env_id]["height"]
+#     width = reg[env_id]["width"]
+#     env = CropScreen(env, height, width, 84, 18)
+#     env = FlashRescale(env)
+
+#     keys = ['left', 'right', 'up', 'down', 'x']
+#     if env_id == 'flashgames.NeonRace-v0':
+#         # Better key space for this game.
+#         keys = ['left', 'right', 'up', 'left up', 'right up', 'down', 'up x']
+#     logger.info('create_flash_env(%s): keys=%s', env_id, keys)
+
+#     env = DiscreteToFixedKeysVNCActions(env, keys)
+#     env = EpisodeID(env)
+#     env = DiagnosticsInfo(env)
+#     env = Unvectorize(env)
+#     env.configure(fps=5.0, remotes=remotes, start_timeout=15 * 60, client_id=client_id,
+#                   vnc_driver='go', vnc_kwargs={
+#                     'encoding': 'tight', 'compress_level': 0,
+#                     'fine_quality_level': 50, 'subsample_level': 3})
+#     return env
+
+# def create_vncatari_env(env_id, client_id, remotes, **_):
+#     env = gym.make(env_id)
+#     env = Vision(env)
+#     env = Logger(env)
+#     env = BlockingReset(env)
+#     env = GymCoreAction(env)
+#     env = AtariRescale42x42(env)
+#     env = EpisodeID(env)
+#     env = DiagnosticsInfo(env)
+#     env = Unvectorize(env)
+
+#     logger.info('Connecting to remotes: %s', remotes)
+#     fps = env.metadata['video.frames_per_second']
+#     env.configure(remotes=remotes, start_timeout=15 * 60, fps=fps, client_id=client_id)
+#     return env
+
+# def create_atari_env(env_id):
+#     env = gym.make(env_id)
+#     env = Vectorize(env)
+#     env = AtariRescale42x42(env)
+#     env = DiagnosticsInfo(env)
+#     env = Unvectorize(env)
+#     return env
+
+def create_snake_env(env_id):
     env = gym.make(env_id)
-    env = Vision(env)
-    env = Logger(env)
-    env = BlockingReset(env)
+    env.configure(remotes=1, docker_image="quay.io/openai/universe.flashgames:0.20.14-heavy")  # automatically creates a local docker container
+    env.action_space = SnakeActionSpace()
+    env = Vision(env) # Remove vision from dicts.
 
-    reg = universe.runtime_spec('flashgames').server_registry
-    height = reg[env_id]["height"]
-    width = reg[env_id]["width"]
-    env = CropScreen(env, height, width, 84, 18)
-    env = FlashRescale(env)
+    # env = Vectorize(env)
+    # env = AtariRescale42x42(env)
 
-    keys = ['left', 'right', 'up', 'down', 'x']
-    if env_id == 'flashgames.NeonRace-v0':
-        # Better key space for this game.
-        keys = ['left', 'right', 'up', 'left up', 'right up', 'down', 'up x']
-    logger.info('create_flash_env(%s): keys=%s', env_id, keys)
+    x1, y1 = (20,85)   # top left
+    x2, y2 = (521,383) # bottom right
 
-    env = DiscreteToFixedKeysVNCActions(env, keys)
-    env = EpisodeID(env)
+    env = CropScreen(env, y2-y1, x2-x1, y1, x1)
     env = DiagnosticsInfo(env)
     env = Unvectorize(env)
-    env.configure(fps=5.0, remotes=remotes, start_timeout=15 * 60, client_id=client_id,
-                  vnc_driver='go', vnc_kwargs={
-                    'encoding': 'tight', 'compress_level': 0,
-                    'fine_quality_level': 50, 'subsample_level': 3})
-    return env
 
-def create_vncatari_env(env_id, client_id, remotes, **_):
-    env = gym.make(env_id)
-    env = Vision(env)
-    env = Logger(env)
-    env = BlockingReset(env)
-    env = GymCoreAction(env)
-    env = AtariRescale42x42(env)
-    env = EpisodeID(env)
-    env = DiagnosticsInfo(env)
-    env = Unvectorize(env)
+    # Override observation space size. Cropped/resized later after rotating.
+    env.observation_space = Box(0, 255, shape=(42, 42, 3))
 
-    logger.info('Connecting to remotes: %s', remotes)
-    fps = env.metadata['video.frames_per_second']
-    env.configure(remotes=remotes, start_timeout=15 * 60, fps=fps, client_id=client_id)
-    return env
-
-def create_atari_env(env_id):
-    env = gym.make(env_id)
-    env = Vectorize(env)
-    env = AtariRescale42x42(env)
-    env = DiagnosticsInfo(env)
-    env = Unvectorize(env)
     return env
 
 def DiagnosticsInfo(env, *args, **kwargs):
@@ -115,6 +161,11 @@ class DiagnosticsInfoI(vectorized.Filter):
             cur_time = time.time()
             elapsed = cur_time - self._last_time
             fps = self._log_interval / elapsed
+            
+            
+            print("Fps: ", fps)
+            
+
             self._last_time = cur_time
             cur_episode_id = info.get('vectorized.episode_id', 0)
             to_log["diagnostics/fps"] = fps
@@ -165,26 +216,67 @@ class DiagnosticsInfoI(vectorized.Filter):
 
         return observation, reward, done, to_log
 
-def _process_frame42(frame):
-    frame = frame[34:34+160, :160]
-    # Resize by half, then down to 42x42 (essentially mipmapping). If
-    # we resize directly we lose pixels that, when mapped to 42x42,
-    # aren't close enough to the pixel boundary.
-    frame = cv2.resize(frame, (80, 80))
-    frame = cv2.resize(frame, (42, 42))
-    frame = frame.mean(2)
-    frame = frame.astype(np.float32)
-    frame *= (1.0 / 255.0)
-    frame = np.reshape(frame, [42, 42, 1])
-    return frame
 
-class AtariRescale42x42(vectorized.ObservationWrapper):
-    def __init__(self, env=None):
-        super(AtariRescale42x42, self).__init__(env)
-        self.observation_space = Box(0.0, 1.0, [42, 42, 1])
 
-    def _observation(self, observation_n):
-        return [_process_frame42(observation) for observation in observation_n]
+# class SnakeProcessImage(vectorized.ObservationWrapper):
+#     def __init__(self, env=None):
+#         super(SnakeProcessImage, self).__init__(env)
+#         self.observation_space = Box(0.0, 1.0, [42, 42, 1])
+
+#     def _observation(self, observation_n):
+#         return [_process_frame42(observation) for observation in observation_n]
+
+#     def _process_frame42(frame):
+
+#         if frame is None:
+#             print("AHHHHHHHHHHHHHHH empty frame???")
+#             return None
+
+#         frame = frame[34:34+160, :160]
+#         # Resize by half, then down to 42x42 (essentially mipmapping). If
+#         # we resize directly we lose pixels that, when mapped to 42x42,
+#         # aren't close enough to the pixel boundary.
+#         frame = cv2.resize(frame, (80, 80))
+#         frame = cv2.resize(frame, (42, 42))
+#         frame = frame.mean(2)
+#         frame = frame.astype(np.float32)
+#         frame *= (1.0 / 255.0)
+#         frame = np.reshape(frame, [42, 42, 1])
+#         return frame
+    
+
+#     def _process_frame(frame):
+#         # Crop and rotate img
+#         x1,y1 = top_left
+#         x2,y2 = bot_right
+
+#         # Crop to board.
+#         img = img[y1:y2,x1:x2]
+
+#         # Rotate
+#         img = rotateImage(img, -current_angle)
+
+#         # Crop to square. (img is wider than high)
+#         hd2 = (y2-y1)//2
+#         wd2  = (x2-x1)//2
+#         img = img[:, wd2-hd2:wd2+hd2]
+
+
+#         cv2.imshow("preview", img)
+#         # Trick to get it to actually update and display the frame.
+#         cv2.waitKey(1)
+        
+#         return img
+
+
+
+# class AtariRescale42x42(vectorized.ObservationWrapper):
+#     def __init__(self, env=None):
+#         super(AtariRescale42x42, self).__init__(env)
+#         self.observation_space = Box(0.0, 1.0, [42, 42, 1])
+
+#     def _observation(self, observation_n):
+#         return [_process_frame42(observation) for observation in observation_n]
 
 class FixedKeyState(object):
     def __init__(self, keys):
@@ -246,6 +338,42 @@ class DiscreteToFixedKeysVNCActions(vectorized.ActionWrapper):
         # Each action might be a length-1 np.array. Cast to int to
         # avoid warnings.
         return [self._actions[int(action)] for action in action_n]
+    
+
+class SnakeActionSpace(gym.Space):
+    # available actions in the game
+    action_angs = []
+    # Num available actions (todo: better)
+    n = n_actions
+
+    # the radius is the distance from the head of the snake to the mouse pointer(in pixel)
+    radius = 60
+
+    def __init__(self):
+        # Generating all the input actions for the snake...
+
+        # Angle range this input is spread over in front of the snake.
+        # cone_size = math.radians(120)
+        cone_size = math.radians(160)
+
+        degree_per_slice = cone_size/(resolution_points-1)
+
+        # We put all mouse positions in the action_sheet
+        for i in range(resolution_points):
+            i -= (resolution_points-1)/2
+            ang = i * degree_per_slice
+
+            self.action_angs.append(ang)
+
+    def sample(self):
+        return [ self.mouse_action(0,0) ]
+
+    def mouse_action(self, snake_angle, input_ix):
+        ang = self.action_angs[input_ix] + snake_angle
+        x = center_x - (self.radius * math.sin(ang))
+        y = center_y - (self.radius * math.cos(ang))
+
+        return universe.spaces.PointerEvent(x, y, 0)
 
 class CropScreen(vectorized.ObservationWrapper):
     """Crops out a [height]x[width] area starting from (top,left) """

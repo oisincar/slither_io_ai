@@ -3,14 +3,19 @@ import os
 import sys
 from six.moves import shlex_quote
 
+
+game_name = 'internet.SlitherIO-v0'
+# game_name = 'internet.SlitherIOEasy-v0'
+# game_name = 'internet.SlitherIONoSkins-v0'
+
 parser = argparse.ArgumentParser(description="Run commands")
 parser.add_argument('-w', '--num-workers', default=1, type=int,
                     help="Number of workers")
 parser.add_argument('-r', '--remotes', default=None,
                     help='The address of pre-existing VNC servers and '
                          'rewarders to use (e.g. -r vnc://localhost:5900+15900,vnc://localhost:5901+15901).')
-parser.add_argument('-e', '--env-id', type=str, default="PongDeterministic-v3",
-                    help="Environment id")
+# parser.add_argument('-e', '--env-id', type=str, default="PongDeterministic-v3",
+#                     help="Environment id")
 parser.add_argument('-l', '--log-dir', type=str, default="/tmp/pong",
                     help="Log directory path")
 parser.add_argument('-n', '--dry-run', action='store_true',
@@ -34,13 +39,13 @@ def new_cmd(session, name, cmd, mode, logdir, shell):
         return name, "nohup {} -c {} >{}/{}.{}.out 2>&1 & echo kill $! >>{}/kill.sh".format(shell, shlex_quote(cmd), logdir, session, name, logdir)
 
 
-def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash', mode='tmux', visualise=False):
+def create_commands(session, num_workers, remotes, logdir, shell='bash', mode='tmux', visualise=False):
     # for launching the TF workers and for launching tensorboard
     base_cmd = [
         'CUDA_VISIBLE_DEVICES=',
         sys.executable, 'worker.py',
         '--log-dir', logdir,
-        '--env-id', env_id,
+        '--env-id', game_name,
         '--num-workers', str(num_workers)]
 
     if visualise:
@@ -58,8 +63,9 @@ def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash',
             "w-%d" % i, base_cmd + ["--job-name", "worker", "--task", str(i), "--remotes", remotes[i]], mode, logdir, shell)]
 
     cmds_map += [new_cmd(session, "tb", ["tensorboard", "--logdir", logdir, "--port", "12345"], mode, logdir, shell)]
-    if mode == 'tmux':
-        cmds_map += [new_cmd(session, "htop", ["htop"], mode, logdir, shell)]
+
+    # if mode == 'tmux':
+    #     cmds_map += [new_cmd(session, "htop", ["htop"], mode, logdir, shell)]
 
     windows = [v[0] for v in cmds_map]
 
@@ -96,7 +102,7 @@ def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash',
 
 def run():
     args = parser.parse_args()
-    cmds, notes = create_commands("a3c", args.num_workers, args.remotes, args.env_id, args.log_dir, mode=args.mode, visualise=args.visualise)
+    cmds, notes = create_commands("a3c", args.num_workers, args.remotes, args.log_dir, mode=args.mode, visualise=args.visualise)
     if args.dry_run:
         print("Dry-run mode due to -n flag, otherwise the following commands would be executed:")
     else:

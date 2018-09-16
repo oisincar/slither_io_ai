@@ -3,10 +3,14 @@ from collections import namedtuple
 import numpy as np
 import tensorflow as tf
 from model import LSTMPolicy
+from gym.spaces.box import Box
 import six.moves.queue as queue
 import scipy.signal
 import threading
 import distutils.version
+import time
+import math
+import cv2
 use_tf12_api = distutils.version.LooseVersion(tf.VERSION) >= distutils.version.LooseVersion('0.12.0')
 
 def discount(x, gamma):
@@ -101,7 +105,38 @@ that would constantly interact with the environment and tell it what to do.  Thi
 
             self.queue.put(next(rollout_provider), timeout=600.0)
 
+# Rotate image about it's center.
+def rotateImage(image, angle):
+    angle = angle * 180 / math.pi
+    image_center = tuple(np.array(image.shape[1::-1]) / 2)
+    rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
+    result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+    return result
 
+def processFrame(img, current_angle):
+    
+    # Empty state on terminal??
+    if img is None:
+        print("WEIRD!!! Empty frame!!")
+        return None
+
+    # Process frame!
+    # Rotate
+    img = rotateImage(img, -current_angle)
+
+    # # Crop to square. (img is wider than high)
+    h,w,c = img.shape
+    img = img[:, w//2-h//2:w//2+h//2, :]
+
+
+    cv2.imshow("preview", img)
+    # Trick to get it to actually update and display the frame.
+    cv2.waitKey(1)
+
+    # Shrink
+    img = cv2.resize(img, (42, 42))
+
+    return img
 
 def env_runner(env, policy, num_local_steps, summary_writer, render):
     """
@@ -109,20 +144,64 @@ The logic of the thread runner.  In brief, it constantly keeps on running
 the policy, and as long as the rollout exceeds a certain length, the thread
 runner appends the policy to the queue.
 """
+    current_angle = 0 # Actually points towards top left..
+
     last_state = env.reset()
+    last_state = processFrame(last_state, 0)
+
     last_features = policy.get_initial_features()
     length = 0
     rewards = 0
+    
+    print("Env Runner starting up!!")
 
     while True:
         terminal_end = False
         rollout = PartialRollout()
+        
+        # TODO: Update value
+        # Need to create some robust-ish-er function that can deal with different speeds of puter.
+        # Can't have it going out of sync if the environment is running faster/slower.
+        # (Insert math here! 0.1s -> 0.3 * diff... Sooo ... ye)
 
+        # Small sub-episode loop. Faster/ better to only update net after a number of examples.
+        
         for _ in range(num_local_steps):
+            
+            # Make sure we can never get a blank frame (i.e. while game is loading/ refreshing)
+            while last_state is None:
+                print("Empty state, waiting .5 seconds")
+                last_state, _, _, _ = env.step(env.action_space.sample())
+
+                # This is ugly...
+                if last_state is not None:
+                    last_state = processFrame(last_state, current_angle)
+
+                if render:
+                    env.render()
+                time.sleep(0.5)
+
+                
+                
             fetched = policy.act(last_state, *last_features)
             action, value_, features = fetched[0], fetched[1], fetched[2:]
+
             # argmax to convert from one-hot
-            state, reward, terminal, info = env.step(action.argmax())
+            act = action.argmax()
+            # Testing actions! Good few frames of every action in order.
+            # act = (length // 400) % 7
+            # TODO: Display the different actions' weights.
+            
+            mouse_mov = env.action_space.mouse_action(current_angle, act)
+            # Update snake ang.
+            target_ang = env.action_space.action_angs[act]
+            current_angle = current_angle + target_ang * 0.055 # experimental no.. Seems to work for framerate/ whatever else is going on..
+
+            state, reward, terminal, info = env.step([ mouse_mov ])
+            state = processFrame(state, current_angle)
+
+            print("Action:", act, "Reward:", reward, "Is end?", terminal)
+
             if render:
                 env.render()
 
@@ -150,6 +229,7 @@ runner appends the policy to the queue.
                 print("Episode finished. Sum of rewards: %d. Length: %d" % (rewards, length))
                 length = 0
                 rewards = 0
+                current_angle = 0 # Actually points towards top left..
                 break
 
         if not terminal_end:
